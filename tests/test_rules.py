@@ -5,7 +5,12 @@ from pathlib import Path
 
 from pkgcheck.compare import match_files
 from pkgcheck.models import Finding, Status
-from pkgcheck.rules import INSTALL_SCRIPTS, apply_rules, check_install_scripts
+from pkgcheck.rules import (
+    INSTALL_SCRIPTS,
+    apply_rules,
+    check_install_scripts,
+    check_unknown_files,
+)
 
 
 def test_no_scripts(tmp_path: Path):
@@ -245,3 +250,179 @@ def test_apply_rules_entry_point(tmp_path: Path):
     assert enriched[0].status == Status.SUSPICIOUS
     assert enriched[0].reason == "install-script"
     assert '"prepare"' in enriched[0].snippet
+
+
+def test_unknown_text_file(tmp_path: Path):
+    """Package contains evil.js, source does not."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    evil_content = "console.log('stealing tokens');\nprocess.exit(1);\n"
+    (pkg_dir / "evil.js").write_text(evil_content)
+
+    findings = [Finding(file="evil.js", status=Status.SUSPICIOUS, reason="unknown-file")]
+    result = check_unknown_files(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].file == "evil.js"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "unknown-file"
+    assert result[0].snippet == evil_content[:200]
+
+
+def test_unknown_file_snippet_truncation(tmp_path: Path):
+    """Unknown file with > 200 characters is truncated to 200 characters in snippet."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    long_content = "a" * 350
+    (pkg_dir / "payload.js").write_text(long_content)
+
+    findings = [Finding(file="payload.js", status=Status.SUSPICIOUS, reason="unknown-file")]
+    result = check_unknown_files(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert len(result[0].snippet) == 200
+    assert result[0].snippet == long_content[:200]
+
+
+def test_empty_unknown_file(tmp_path: Path):
+    """Zero-byte unknown file gets empty string snippet."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    (pkg_dir / "empty.js").write_text("")
+
+    findings = [Finding(file="empty.js", status=Status.SUSPICIOUS, reason="unknown-file")]
+    result = check_unknown_files(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "unknown-file"
+    assert result[0].snippet == ""
+
+
+def test_missing_file_on_disk(tmp_path: Path):
+    """Finding has reason='unknown-file' but file does not exist on disk."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    findings = [Finding(file="ghost.js", status=Status.SUSPICIOUS, reason="unknown-file")]
+    result = check_unknown_files(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].file == "ghost.js"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "unknown-file"
+    assert result[0].snippet is None
+
+
+def test_preserve_existing_findings_with_unknown_rule(tmp_path: Path):
+    """Matched, missing-in-package, and install-script findings remain unchanged."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    (pkg_dir / "backdoor.js").write_text("backdoor_code()")
+
+    matched_finding = Finding(
+        file="index.js",
+        status=Status.EXPECTED,
+        reason="matched",
+        snippet="console.log(1)",
+    )
+    missing_finding = Finding(
+        file="README.md",
+        status=Status.EXPECTED,
+        reason="missing-in-package",
+    )
+    install_script_finding = Finding(
+        file="package.json",
+        status=Status.SUSPICIOUS,
+        reason="install-script",
+        snippet='"postinstall": "curl evil"',
+    )
+    unknown_finding = Finding(
+        file="backdoor.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+    )
+
+    findings = [
+        matched_finding,
+        missing_finding,
+        install_script_finding,
+        unknown_finding,
+    ]
+
+    result = check_unknown_files(pkg_dir, src_dir, findings)
+
+    assert result[0].file == "index.js"
+    assert result[0].status == Status.EXPECTED
+    assert result[0].reason == "matched"
+    assert result[0].snippet == "console.log(1)"
+
+    assert result[1].file == "README.md"
+    assert result[1].status == Status.EXPECTED
+    assert result[1].reason == "missing-in-package"
+
+    assert result[2].file == "package.json"
+    assert result[2].status == Status.SUSPICIOUS
+    assert result[2].reason == "install-script"
+    assert result[2].snippet == '"postinstall": "curl evil"'
+
+    assert result[3].file == "backdoor.js"
+    assert result[3].status == Status.SUSPICIOUS
+    assert result[3].reason == "unknown-file"
+    assert result[3].snippet == "backdoor_code()"
+
+
+def test_apply_rules_integration_both_rules(tmp_path: Path):
+    """apply_rules performs both install-script detection and unknown-file enrichment."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    (pkg_dir / "package.json").write_text(
+        json.dumps({"name": "demo", "scripts": {"postinstall": "node inject.js"}})
+    )
+    (src_dir / "package.json").write_text(
+        json.dumps({"name": "demo", "scripts": {}})
+    )
+
+    (pkg_dir / "inject.js").write_text("malicious_injection_payload();")
+    (pkg_dir / "index.js").write_text("console.log('main');")
+    (src_dir / "index.js").write_text("console.log('main');")
+
+    findings = match_files(
+        ["index.js", "inject.js", "package.json"],
+        ["index.js", "package.json"],
+    )
+
+    enriched = apply_rules(pkg_dir, src_dir, findings)
+
+    by_file = {f.file: f for f in enriched}
+
+    # index.js: matched, EXPECTED
+    assert by_file["index.js"].status == Status.EXPECTED
+    assert by_file["index.js"].reason == "matched"
+
+    # package.json: install-script, SUSPICIOUS
+    assert by_file["package.json"].status == Status.SUSPICIOUS
+    assert by_file["package.json"].reason == "install-script"
+    assert '"postinstall"' in by_file["package.json"].snippet
+
+    # inject.js: unknown-file, SUSPICIOUS, snippet enriched
+    assert by_file["inject.js"].status == Status.SUSPICIOUS
+    assert by_file["inject.js"].reason == "unknown-file"
+    assert by_file["inject.js"].snippet == "malicious_injection_payload();"
