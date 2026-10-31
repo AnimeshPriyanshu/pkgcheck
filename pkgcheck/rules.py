@@ -21,6 +21,15 @@ HUGE_LINE_THRESHOLD = 500
 HEX_ESCAPE_PATTERN = re.compile(r"\\x[0-9a-fA-F]{2}")
 EVAL_PATTERN = re.compile(r"\beval\s*\(")
 
+BUILD_DIRS = {"dist"}
+BUILD_EXTENSIONS = {
+    ".min.js",
+    ".min.css",
+    ".d.ts",
+    ".map",
+}
+SOURCE_EXTENSIONS = {".ts", ".js", ".tsx", ".jsx"}
+
 
 def _load_json(file_path: Path) -> dict | None:
     """Safely load and parse a JSON file, returning None if missing or invalid."""
@@ -158,6 +167,112 @@ def check_obfuscation(
     return findings
 
 
+def _is_build_artifact(rel_path: str) -> bool:
+    """Check if a relative path matches build output directory or artifact suffix."""
+    p = Path(rel_path)
+    if any(part in BUILD_DIRS for part in p.parts[:-1]):
+        return True
+    if any(rel_path.endswith(ext) for ext in BUILD_EXTENSIONS):
+        return True
+    return False
+
+
+def _has_matching_source(rel_path: str, source_dir: Path) -> bool:
+    """Determine whether a build artifact corresponds to an actual source file."""
+    p = Path(rel_path)
+    parts = list(p.parts)
+    if parts and parts[0] in BUILD_DIRS:
+        parts = parts[1:]
+    if not parts:
+        return False
+
+    filename = parts[-1]
+    parent_path = Path(*parts[:-1]) if len(parts) > 1 else Path()
+
+    # Normalize build suffixes to determine the base stem
+    base_name = filename
+    for suffix in (
+        ".min.js.map",
+        ".min.css.map",
+        ".js.map",
+        ".css.map",
+        ".map",
+        ".min.js",
+        ".min.css",
+        ".d.ts",
+    ):
+        if filename.endswith(suffix):
+            base_name = filename[: -len(suffix)]
+            break
+    else:
+        base_name = Path(filename).stem
+
+    # Candidate extensions to check in source
+    candidate_exts = sorted(SOURCE_EXTENSIONS)
+    if filename.endswith(".min.css") or filename.endswith(".css"):
+        candidate_exts.append(".css")
+
+    # Check candidates under src/ and root of source_dir
+    for ext in candidate_exts:
+        candidate_name = f"{base_name}{ext}"
+        if (source_dir / "src" / parent_path / candidate_name).is_file():
+            return True
+        if (source_dir / parent_path / candidate_name).is_file():
+            return True
+
+    # Also check exact filename under src/ and root
+    if (source_dir / "src" / parent_path / filename).is_file():
+        return True
+    if (source_dir / parent_path / filename).is_file():
+        return True
+
+    return False
+
+
+def _has_dangerous_obfuscation(file_path: Path) -> bool:
+    """Check if file contains eval() or >= 3 hex escapes on any line."""
+    if not file_path.is_file():
+        return False
+    try:
+        with file_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if EVAL_PATTERN.search(line):
+                    return True
+                if len(HEX_ESCAPE_PATTERN.findall(line)) >= 3:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def check_build_output(
+    package_dir: Path,
+    source_dir: Path,
+    findings: list[Finding],
+) -> list[Finding]:
+    """Reclassify legitimate build artifacts that match source and are not obfuscated."""
+    for finding in findings:
+        if finding.reason not in {"unknown-file", "obfuscation"}:
+            continue
+
+        if not _is_build_artifact(finding.file):
+            continue
+
+        if not _has_matching_source(finding.file, source_dir):
+            continue
+
+        file_path = package_dir / finding.file
+        if _has_dangerous_obfuscation(file_path):
+            continue
+
+        finding.status = Status.EXPECTED
+        finding.reason = "build-output"
+        finding.snippet = None
+        finding.line = None
+
+    return findings
+
+
 def apply_rules(
     package_dir: Path,
     source_dir: Path,
@@ -167,4 +282,5 @@ def apply_rules(
     findings = check_install_scripts(package_dir, source_dir, findings)
     findings = check_unknown_files(package_dir, source_dir, findings)
     findings = check_obfuscation(package_dir, source_dir, findings)
+    findings = check_build_output(package_dir, source_dir, findings)
     return findings
