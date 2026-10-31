@@ -76,7 +76,7 @@ report.py  → prints table / JSON, returns exit code
 ## 4. WHEN YOU FINISH A TASK
 
 Rules every person follows:
-- Tick your row in the table above **in the same PR as your work** (edit HACKATHON_PLAN.md, commit, push).
+- Ani updates the board. After your PR merges, message Ani. Ani ticks rows in a small docs/board-update PR about once an hour. Do not edit the board in your feature PR.
 - Run `git checkout main && git pull` before starting every new branch.
 - Tests go in the same PR as the code.
 - The PR description names the **models used** (`google/gemma-4-e4b` via LM Studio) and the **AI coding assistant** (opencode / nemotron-3-ultra).
