@@ -33,7 +33,7 @@ The system will provide evidence for detected differences and explain them in a 
 
 ## Open-Weight Model
 
-**Model:** `[MODEL NAME]`
+**Model:** `google/gemma-4-e4b`
 
 ### Why are we using it?
 
