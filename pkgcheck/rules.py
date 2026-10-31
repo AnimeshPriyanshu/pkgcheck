@@ -76,10 +76,37 @@ def check_install_scripts(
     return findings
 
 
+def check_unknown_files(
+    package_dir: Path,
+    source_dir: Path,
+    findings: list[Finding],
+) -> list[Finding]:
+    """Enrich unknown-file findings with file content snippets."""
+    for finding in findings:
+        if finding.reason != "unknown-file":
+            continue
+
+        finding.status = Status.SUSPICIOUS
+        file_path = package_dir / finding.file
+
+        if file_path.is_file():
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="replace")
+                finding.snippet = content[:200]
+            except Exception:
+                finding.snippet = None
+        else:
+            finding.snippet = None
+
+    return findings
+
+
 def apply_rules(
     package_dir: Path,
     source_dir: Path,
     findings: list[Finding],
 ) -> list[Finding]:
     """Apply detection rules to enrich findings."""
-    return check_install_scripts(package_dir, source_dir, findings)
+    findings = check_install_scripts(package_dir, source_dir, findings)
+    findings = check_unknown_files(package_dir, source_dir, findings)
+    return findings
