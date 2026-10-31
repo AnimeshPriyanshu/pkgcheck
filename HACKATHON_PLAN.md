@@ -38,121 +38,78 @@ report.py  → prints table / JSON, returns exit code
 
 ---
 
-## 2. Work Split (4 People, 6 Core Files + Tests)
+## 2. ROLES
 
-| Person | Owns (code) | Owns (tests) | Also Does |
-|--------|-------------|--------------|-----------|
-| **A** | `models.py`, `compare.py` | `tests/test_models.py`, `tests/test_compare.py` | CI config |
-| **B** | `rules.py` | `tests/test_rules.py` | Fixtures (poisoned package) |
-| **C** | `explain.py`, `report.py` | `tests/test_explain.py`, `tests/test_report.py` | Demo script, examples/ folder |
-| **D** | `cli.py`, `__main__.py`, `README.md` | `tests/test_cli.py` | PR templates, license, submission |
+| Code | Name | Owns | Cross-reviews |
+|------|------|------|---------------|
+| **A** | Ani | `models.py`, `compare.py` | B |
+| **B** | Ris | `fixtures/`, `rules.py` (one rule per PR) | A |
+| **C** | NA | `explain.py`, `report.py` | D |
+| **D** | PV | `README.md`, `__main__.py`, `cli.py` | C |
 
-**Why this split:**
-- A creates `models.py` first (shared contract), then `compare.py` — both in separate PRs.
-- B writes `rules.py` in **one rule per PR** after `compare.py` merges (depends on Finding shape).
-- C starts `explain.py` with mocked tests after `models.py` merges, then `report.py`.
-- D does `README.md` early, then `__main__.py`, then `cli.py` wiring once compare/rules/report are merged.
-- **No `fetch.py`** — cut per fallback plan. No stub files committed.
-- Everyone writes tests in the same PR as their module. `__init__.py` stays minimal (version only).
+**Pairs:** A↔B, C↔D. Each PR reviewed by the partner.
 
 ---
 
-## 3. Milestone Table
+## 3. WAVES AND TASK BOARD
 
-| ID | Owner | Branch | PR Title | Delivers | Depends On | Definition of Done | Time Window |
-|----|-------|--------|----------|----------|------------|-------------------|-------------|
-| M0 | All | — | — | Repo init, CI, PR template, smoke test | — | CI green, `pytest` passes, `pkgcheck` prints version | 6:30–7:00 PM (30 min) |
-| M1 | A | `feat/shared-models` | Shared: models.py with Finding, Status | `models.py` with Finding(explanation), Status enum | M0 | Tests pass; exported from pkgcheck | 1:07–1:30 AM (23 min) |
-| M2 | A | `feat/compare-file-listing` | Compare: list files in package vs source | `compare.py: list_package_files, list_source_files, match_files → list[Finding]` | M1 | Unit tests for listing/matching; list_source_files ignores .git only | 1:30–2:30 AM (60 min) |
-| M3 | C | `feat/explain-gemma` | Explain: Gemma via LM Studio for suspicious findings | `explain.py: explain_findings(findings) → list[Finding]` adds .explanation | M1 (Finding shape) | Tests with mocked LM Studio; graceful fallback if unreachable | 1:30–2:30 AM (60 min, parallel with M2) |
-| M4 | C | `feat/report-output` | Report: table, JSON, exit code | `report.py: render(findings, format) → str` + exit_code_for_findings | M1 | Tests for table/JSON; exit 1 if any SUSPICIOUS | 2:30–3:15 AM (45 min) |
-| M5 | B | `feat/rule-install-scripts` | Rule: install scripts (preinstall/install/postinstall) | `rules.py: apply_rules` — install-script on matched package.json | M2 (compare) | Test: detects added/changed hooks in package.json | 2:30–3:15 AM (45 min) |
-| M6 | B | `feat/rule-unknown-files` | Rule: unknown files in package | `rules.py: apply_rules` — unknown-file stays SUSPICIOUS | M2 | Test: poisoned fixture unknown.txt flagged | 3:15–3:45 AM (30 min) |
-| M7 | B | `feat/rule-obfuscation` | Rule: obfuscation detection | `rules.py: apply_rules` — huge lines, \x escapes, eval() | M2 | Test: poisoned fixture obfuscated.js flagged | 3:45–4:15 AM (30 min) |
-| M8 | B | `feat/rule-build-output` | Rule: build output matched with source = Expected | `rules.py: apply_rules` — build-output only if source match + not obfuscated | M2 | Test: dist/file.min.js with source = Expected | 4:15–4:45 AM (30 min) |
-| M9 | D | `feat/cli-wiring` | CLI: wire all modules, add flags | `cli.py: main(args)` calls compare→rules→explain→report | M2, M3, M4, M5-M8 | Smoke test runs full pipeline on fixtures; `--json` flag works | 4:45–5:15 AM (30 min) |
-| M10 | D | `feat/readme-main` | README + __main__.py entry point | `README.md` with usage; `__main__.py` calls cli.main | M0 | `python -m pkgcheck` works; README renders | 1:30–2:00 AM (30 min, parallel) |
-| M11 | All | `chore/examples-and-docs` | Examples folder, final HACKATHON.md | `examples/` with real output; updated HACKATHON.md | M9 | `examples/` committed; HACKATHON.md matches rubric | 5:15–5:45 AM (30 min) |
-| M12 | All | `chore/polish-and-demo` | Polish, demo rehearsal, submission | No secrets, license, CI green, OrganizerHQ submitted | M11 | All checks pass; demo runs in < 2 min | 5:45–6:15 AM (30 min) |
-| — | — | — | **FEATURE FREEZE** | No new features after 5:00 AM | — | Only bug fixes, docs, README | 5:00 AM |
-| — | — | — | **FINAL MERGE DEADLINE** | Last PR merged by 6:30 AM | — | CI green on main | 6:30 AM |
-
----
-
-## 4. Critical Path
-
-```
-M0 (init) → M1 (shared-models)
-                ↓
-         M2 (compare) + M3 (explain) [PARALLEL]
-                ↓              ↓
-         M4 (report) ← needs M1
-                ↓
-    M5→M6→M7→M8 (rules, sequential) ← needs M2
-                ↓
-         M9 (cli-wiring) ← needs M2,M3,M4,M5-M8
-                ↓
-         M10 (README/__main__) + M11 (examples) [PARALLEL]
-                ↓
-         M12 (polish) → DONE
-```
-
-**What each person does while waiting:**
-
-| Person | While Waiting For… | Does This Instead |
-|--------|-------------------|-------------------|
-| A | — | M1 first, then M2 immediately |
-| B | M2 (compare) | Build poisoned fixtures, write rule test skeletons offline |
-| C | M1 (models) | M3 (explain) starts immediately after M1 merges; M4 after |
-| D | M2,M3,M4,M5-M8 | M10 (README/__main__) early; prep cli wiring skeleton |
+| ID | Wave | Owner | Branch | Delivers | Depends on | Status |
+|----|------|-------|--------|----------|------------|--------|
+| W1-A1 | 1 | A | `feat/shared-models` | `models.py` (Status, Finding with explanation) + tests | — | not started |
+| W1-A2 | 1 | A | `docs/hackathon-plan-fix` | Plan corrections | — | in progress |
+| W1-B1 | 1 | B | `test/fixtures` | Clean + poisoned fixtures (harmless) + `tests/fixtures/README.md` | — | not started |
+| W1-D1 | 1 | D | `docs/readme` | `README.md` | — | not started |
+| W1-D2 | 1 | D | `feat/main-module` | `__main__.py` + subprocess test | — | not started |
+| W1-C0 | 1 | C | *(no PR)* | LM Studio running `google/gemma-4-e4b`, local server tested | — | not started |
+| W2-A3 | 2 | A | `feat/compare-file-listing` | `compare.py` + tests | W1-A1 | not started |
+| W2-C1 | 2 | C | `feat/explain-gemma` | `explain.py` with mocked test + fallback | W1-A1 | not started |
+| W3-B2 | 3 | B | `feat/rule-install-scripts` | Install-script rule (json diff on matched package.json) | W2-A3, W1-B1 | not started |
+| W3-B3 | 3 | B | `feat/rule-unknown-files` | Unknown-file rule | W3-B2 | not started |
+| W3-B4 | 3 | B | `feat/rule-obfuscation` | Obfuscation rule (huge lines, \x escapes, eval) | W3-B2 | not started |
+| W3-B5 | 3 | B | `feat/rule-build-output` | Build-output rule (source match + not obfuscated) | W3-B2 | not started |
+| W3-C2 | 3 | C | `feat/report-output` | Table, JSON, exit code 0/1 | W1-A1 | not started |
+| W4-D3 | 4 | D | `feat/cli-wiring` | CLI wiring: compare→rules→explain→report, `--json` flag | W2-A3, W3-B2, W3-C2 (explain if W2-C1 merged) | not started |
+| W5-ALL | 5 | All | `docs/examples-output` | Real output on both fixtures, demo rehearsal, blog post | W4-D3 | not started |
 
 ---
 
-## 5. Timeline (Current: 1:07 AM, ~5.5 hrs left)
+## 4. WHEN YOU FINISH A TASK
 
-| Time | Activity |
-|------|----------|
-| **1:07–1:30 AM** | **M1**: A creates `feat/shared-models` (models.py + tests). All review. |
-| **1:30–2:30 AM** | **M2 + M3 parallel**: A on `feat/compare-file-listing`; C on `feat/explain-gemma`. |
-| **1:30–2:00 AM** | **M10 parallel**: D on `feat/readme-main` (README + `__main__.py`). |
-| **2:30–3:15 AM** | **M4 + M5 parallel**: C on `feat/report-output`; B on `feat/rule-install-scripts`. |
-| **3:15–4:45 AM** | **M6→M7→M8 sequential**: B does 3 rule PRs (unknown-files, obfuscation, build-output). |
-| **4:45–5:15 AM** | **M9**: D wires CLI (`feat/cli-wiring`) once all deps merged. |
-| **5:15–5:45 AM** | **M11**: All create `examples/`, finalize HACKATHON.md. |
-| **5:45–6:15 AM** | **M12**: Final polish, demo rehearsal, OrganizerHQ submission. |
-| **6:15–6:30 AM** | **Buffer**: Last CI checks, merge final PRs. |
-| **6:30 AM** | **Hackathon ends** — last merge must be in. |
-| **8:30 AM** | **Presentations + Q&A** — any member can be asked about any file. |
+Rules every person follows:
+- Tick your row in the table above **in the same PR as your work** (edit HACKATHON_PLAN.md, commit, push).
+- Run `git checkout main && git pull` before starting every new branch.
+- Tests go in the same PR as the code.
+- The PR description names the **models used** (`google/gemma-4-e4b` via LM Studio) and the **AI coding assistant** (opencode / nemotron-3-ultra).
 
 ---
 
-## 6. Cross-Review Pairs
+## 5. TIME AND CUT LIST
 
-| Reviewer | Reviews |
-|----------|---------|
-| A | B's rule PRs, D's CLI/README PRs |
-| B | A's compare PR, C's explain/report PRs |
-| C | D's CLI/README PRs, A's compare PR |
-| D | C's explain/report PRs, B's rule PRs |
-
-**Rule:** Self-merge only if no one else is available. Ping in Discord/Slack for review.
+- **Feature freeze:** 90 minutes before 6:30 AM (5:00 AM).
+- **Last merge:** 6:30 AM sharp.
+- **Cut order if short on time:**
+  1. JSON output (keep table only)
+  2. Obfuscation rule
+  3. Build-output rule
+- **Never cut:** compare, install-scripts rule, unknown-files rule, table report, exit code, CLI, `examples/`, `README.md`.
+- `fetch.py` is cut — no stub files committed.
 
 ---
 
-## 7. Learning Task Per Person (So Everyone Can Explain Everything)
+## 6. Learning Task Per Person (So Everyone Can Explain Everything)
 
 | Person | Must Be Able to Explain |
 |--------|-------------------------|
-| A | How `models.py` defines Finding/Status; how `compare.py` produces findings |
-| B | Each rule: install-scripts (json diff), unknown-files, obfuscation (heuristics), build-output (source match + not obfuscated) |
-| C | How Gemma is called via LM Studio, fallback to reason, how report formats table/JSON + exit code |
-| D | Full CLI flow: args → compare → rules → explain → report → exit code; README usage |
+| A (Ani) | How `models.py` defines Finding/Status; how `compare.py` produces findings |
+| B (Ris) | Each rule: install-scripts (json diff), unknown-files, obfuscation (heuristics), build-output (source match + not obfuscated) |
+| C (NA) | How Gemma is called via LM Studio, fallback to reason, how report formats table/JSON + exit code |
+| D (PV) | Full CLI flow: args → compare → rules → explain → report → exit code; README usage |
 
 **Practice:** 15-min pair walkthroughs after each milestone merges.
 
 ---
 
-## 8. Fallback Plan (If Behind)
+## 7. Fallback Plan (If Behind)
 
 | Priority | Cut First |
 |----------|-----------|
@@ -166,7 +123,7 @@ M0 (init) → M1 (shared-models)
 
 ---
 
-## 9. Final Checklist Before 6:30 AM
+## 8. Final Checklist Before 6:30 AM
 
 - [ ] CI green on `main` (both workflows pass)
 - [ ] `HACKATHON.md` exists with: problem statement, models used (google/gemma-4-e4b via LM Studio), AI assistant (opencode/nemotron-3-ultra), team, demo instructions
@@ -184,7 +141,7 @@ M0 (init) → M1 (shared-models)
 
 ---
 
-## Quick Reference: Branch Naming
+## 9. Quick Reference: Branch Naming
 
 ```
 feat/<short-description>    # new feature
@@ -198,7 +155,7 @@ Example: `feat/shared-models`, `feat/rule-install-scripts`, `docs/hackathon-plan
 
 ---
 
-## Communication
+## 10. Communication
 
 - **Discord/Slack channel** for instant sync
 - **PR comments** for code review
@@ -207,4 +164,4 @@ Example: `feat/shared-models`, `feat/rule-install-scripts`, `docs/hackathon-plan
 
 ---
 
-*Plan version 2.0 — updated at 1:07 AM per team sync.*
+*Plan version 3.0 — updated with roles, waves, task board, and cut list.*
