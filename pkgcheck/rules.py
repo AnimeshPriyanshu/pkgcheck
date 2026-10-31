@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import re
 
 from pkgcheck.models import Finding, Status
 
@@ -14,6 +15,11 @@ INSTALL_SCRIPTS = {
     "prepare",
     "postprepare",
 }
+
+JS_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
+HUGE_LINE_THRESHOLD = 500
+HEX_ESCAPE_PATTERN = re.compile(r"\\x[0-9a-fA-F]{2}")
+EVAL_PATTERN = re.compile(r"\beval\s*\(")
 
 
 def _load_json(file_path: Path) -> dict | None:
@@ -101,6 +107,57 @@ def check_unknown_files(
     return findings
 
 
+def check_obfuscation(
+    package_dir: Path,
+    source_dir: Path,
+    findings: list[Finding],
+) -> list[Finding]:
+    """Check package files for obfuscated code patterns."""
+    for finding in findings:
+        if finding.status != Status.EXPECTED:
+            continue
+
+        if Path(finding.file).suffix.lower() not in JS_EXTENSIONS:
+            continue
+
+        file_path = package_dir / finding.file
+        if not file_path.is_file():
+            continue
+
+        try:
+            with file_path.open("r", encoding="utf-8", errors="replace") as f:
+                for line_idx, line in enumerate(f, start=1):
+                    # Check huge line heuristic
+                    clean_line = line.rstrip("\r\n")
+                    if len(clean_line) > HUGE_LINE_THRESHOLD:
+                        finding.status = Status.SUSPICIOUS
+                        finding.reason = "obfuscation"
+                        finding.line = line_idx
+                        finding.snippet = clean_line.strip()[:200]
+                        break
+
+                    # Check hexadecimal escape heuristic (>= 3 matches)
+                    hex_count = len(HEX_ESCAPE_PATTERN.findall(line))
+                    if hex_count >= 3:
+                        finding.status = Status.SUSPICIOUS
+                        finding.reason = "obfuscation"
+                        finding.line = line_idx
+                        finding.snippet = line.strip()[:200]
+                        break
+
+                    # Check eval heuristic
+                    if EVAL_PATTERN.search(line):
+                        finding.status = Status.SUSPICIOUS
+                        finding.reason = "obfuscation"
+                        finding.line = line_idx
+                        finding.snippet = line.strip()[:200]
+                        break
+        except Exception:
+            continue
+
+    return findings
+
+
 def apply_rules(
     package_dir: Path,
     source_dir: Path,
@@ -109,4 +166,5 @@ def apply_rules(
     """Apply detection rules to enrich findings."""
     findings = check_install_scripts(package_dir, source_dir, findings)
     findings = check_unknown_files(package_dir, source_dir, findings)
+    findings = check_obfuscation(package_dir, source_dir, findings)
     return findings
