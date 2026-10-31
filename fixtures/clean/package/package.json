@@ -1,0 +1,16 @@
+{
+  "name": "pkgcheck-clean-fixture",
+  "version": "1.0.0",
+  "description": "A clean sample package for pkgcheck testing",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 0"
+  },
+  "keywords": [
+    "pkgcheck",
+    "test",
+    "clean"
+  ],
+  "author": "OpenSourcers",
+  "license": "MIT"
+}
