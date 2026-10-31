@@ -4,12 +4,12 @@ This directory documents the sample test packages used to validate `pkgcheck` de
 
 ## Fixture Structure
 
-The fixtures are located under the root `fixtures/` directory:
+The fixtures are located under `tests/fixtures/`:
 
-- `fixtures/clean/`:
+- `tests/fixtures/clean/`:
   - `source/`: Legitimate GitHub source repository files (`package.json`, `index.js`, `README.md`).
   - `package/`: Published npm package files (identical to source).
-- `fixtures/poisoned/`:
+- `tests/fixtures/poisoned/`:
   - `source/`: Clean GitHub source repository files (`package.json`, `index.js`).
   - `package/`: Published npm package files containing hidden supply-chain tamper indicators (`package.json`, `setup.js`).
 

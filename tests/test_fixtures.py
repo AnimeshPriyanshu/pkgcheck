@@ -7,7 +7,7 @@ from pkgcheck.compare import list_package_files, list_source_files, match_files
 from pkgcheck.models import Status
 from pkgcheck.rules import INSTALL_SCRIPTS, apply_rules
 
-FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
 def test_clean_fixture_directories_and_files_exist():
