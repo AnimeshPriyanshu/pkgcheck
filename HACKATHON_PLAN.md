@@ -56,18 +56,18 @@ report.py  → prints table / JSON, returns exit code
 | ID | Wave | Owner | Branch | Delivers | Depends on | Status |
 |----|------|-------|--------|----------|------------|--------|
 | W1-A1 | 1 | A | `feat/shared-models` | `models.py` (Status, Finding with explanation) + tests | — | merged |
-| W1-A2 | 1 | A | `docs/hackathon-plan-fix` | Plan corrections | — | in progress |
+| W1-A2 | 1 | A | `docs/hackathon-plan-fix` | Plan corrections | — | merged |
 | W1-B1 | 1 | B | `test/fixtures` | Clean + poisoned fixtures (harmless) + `tests/fixtures/README.md` | — | merged |
 | W1-D1 | 1 | D | `docs/readme` | `README.md` | — | not started |
 | W1-D2 | 1 | D | `feat/main-module` | `__main__.py` + subprocess test | — | not started |
-| W1-C0 | 1 | C | *(no PR)* | LM Studio running `google/gemma-4-e4b`, local server tested | — | not started |
+| W1-C0 | 1 | C | *(no PR)* | LM Studio running `google/gemma-4-e4b`, local server tested | — | verified |
 | W2-A3 | 2 | A | `feat/compare-file-listing` | `compare.py` + tests | W1-A1 | merged |
-| W2-C1 | 2 | C | `feat/explain-gemma` | `explain.py` with mocked test + fallback | W1-A1 | not started |
+| W2-C1 | 2 | C | `feat/explain-gemma` | `explain.py` with mocked test + fallback | W1-A1 | merged |
 | W3-B2 | 3 | B | `feat/rule-install-scripts` | Install-script rule (json diff on matched package.json) | W2-A3, W1-B1 | merged |
 | W3-B3 | 3 | B | `feat/rule-unknown-files` | Unknown-file rule | W3-B2 | merged |
 | W3-B4 | 3 | B | `feat/rule-obfuscation` | Obfuscation rule (huge lines, \x escapes, eval) | W3-B2 | merged |
 | W3-B5 | 3 | B | `feat/rule-build-output` | Build-output rule (source match + not obfuscated) | W3-B2 | merged |
-| W3-C2 | 3 | C | `feat/report-output` | Table, JSON, exit code 0/1 | W1-A1 | not started |
+| W3-C2 | 3 | C | `feat/report-output` | Table, JSON, exit code 0/1 | W1-A1 | merged |
 | W4-D3 | 4 | D | `feat/cli-wiring` | CLI wiring: compare→rules→explain→report, `--json` flag | W2-A3, W3-B2, W3-C2 (explain if W2-C1 merged) | not started |
 | W5-ALL | 5 | All | `docs/examples-output` | Real output on both fixtures, demo rehearsal, blog post | W4-D3 | not started |
 
