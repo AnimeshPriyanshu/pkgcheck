@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pkgcheck"
+version = "0.1.0"
+description = "Compare npm package with GitHub source"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+pkgcheck = "pkgcheck.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
