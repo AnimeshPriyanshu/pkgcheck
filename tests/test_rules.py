@@ -9,6 +9,7 @@ from pkgcheck.rules import (
     INSTALL_SCRIPTS,
     apply_rules,
     check_install_scripts,
+    check_obfuscation,
     check_unknown_files,
 )
 
@@ -426,3 +427,224 @@ def test_apply_rules_integration_both_rules(tmp_path: Path):
     assert by_file["inject.js"].status == Status.SUSPICIOUS
     assert by_file["inject.js"].reason == "unknown-file"
     assert by_file["inject.js"].snippet == "malicious_injection_payload();"
+
+
+def test_obfuscation_huge_line(tmp_path: Path):
+    """JS file containing a line longer than 500 characters triggers obfuscation."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    long_line = "const payload = '" + ("x" * 520) + "';"
+    content = f"// normal line\n{long_line}\nconsole.log(1);\n"
+    (pkg_dir / "index.js").write_text(content)
+    (src_dir / "index.js").write_text("// original source\n")
+
+    findings = [Finding(file="index.js", status=Status.EXPECTED, reason="matched")]
+    result = check_obfuscation(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "obfuscation"
+    assert result[0].line == 2
+    assert len(result[0].snippet) <= 200
+    assert result[0].snippet == long_line.strip()[:200]
+
+
+def test_obfuscation_hex_escapes(tmp_path: Path):
+    """JS file containing at least three hexadecimal escapes triggers obfuscation."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    content = 'const payload = "\\x61\\x62\\x63\\x64";\n'
+    (pkg_dir / "bundle.js").write_text(content)
+    (src_dir / "bundle.js").write_text('const payload = "abcd";\n')
+
+    findings = [Finding(file="bundle.js", status=Status.EXPECTED, reason="matched")]
+    result = check_obfuscation(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "obfuscation"
+    assert result[0].line == 1
+    assert "\\x61\\x62\\x63\\x64" in result[0].snippet
+
+
+def test_obfuscation_single_hex_escape_does_not_trigger(tmp_path: Path):
+    """JS file containing only one hex escape does not trigger obfuscation."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    content = 'const nullByte = "\\x00";\nconsole.log(nullByte);\n'
+    (pkg_dir / "util.js").write_text(content)
+    (src_dir / "util.js").write_text(content)
+
+    findings = [Finding(file="util.js", status=Status.EXPECTED, reason="matched")]
+    result = check_obfuscation(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].status == Status.EXPECTED
+    assert result[0].reason == "matched"
+    assert result[0].line is None
+    assert result[0].snippet is None
+
+
+def test_obfuscation_eval(tmp_path: Path):
+    """JS file containing eval() triggers obfuscation."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    content = "// header\nlet payload = getPayload();\neval(payload);\n"
+    (pkg_dir / "main.js").write_text(content)
+    (src_dir / "main.js").write_text("// clean source\n")
+
+    findings = [Finding(file="main.js", status=Status.EXPECTED, reason="matched")]
+    result = check_obfuscation(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "obfuscation"
+    assert result[0].line == 3
+    assert "eval" in result[0].snippet
+
+
+def test_obfuscation_clean_js(tmp_path: Path):
+    """Normal short code with no huge lines, <3 hex escapes, no eval remains EXPECTED."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    content = "export function add(a, b) {\n    return a + b;\n}\n"
+    (pkg_dir / "math.ts").write_text(content)
+    (src_dir / "math.ts").write_text(content)
+
+    findings = [Finding(file="math.ts", status=Status.EXPECTED, reason="matched")]
+    result = check_obfuscation(pkg_dir, src_dir, findings)
+
+    assert len(result) == 1
+    assert result[0].status == Status.EXPECTED
+    assert result[0].reason == "matched"
+    assert result[0].snippet is None
+    assert result[0].line is None
+
+
+def test_obfuscation_non_code_files_ignored(tmp_path: Path):
+    """Non-JS/TS files like .md or .json are not scanned for obfuscation."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    long_line = "Docs: " + ("word " * 150) + " eval(payload) \\x61\\x62\\x63\\x64"
+    (pkg_dir / "README.md").write_text(long_line)
+    (src_dir / "README.md").write_text(long_line)
+
+    (pkg_dir / "data.json").write_text(json.dumps({"description": long_line}))
+    (src_dir / "data.json").write_text(json.dumps({"description": long_line}))
+
+    findings = [
+        Finding(file="README.md", status=Status.EXPECTED, reason="matched"),
+        Finding(file="data.json", status=Status.EXPECTED, reason="matched"),
+    ]
+    result = check_obfuscation(pkg_dir, src_dir, findings)
+
+    assert result[0].file == "README.md"
+    assert result[0].status == Status.EXPECTED
+    assert result[0].reason == "matched"
+
+    assert result[1].file == "data.json"
+    assert result[1].status == Status.EXPECTED
+    assert result[1].reason == "matched"
+
+
+def test_obfuscation_preserve_previous_findings(tmp_path: Path):
+    """Existing install-script and unknown-file findings are not overwritten."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    install_finding = Finding(
+        file="package.json",
+        status=Status.SUSPICIOUS,
+        reason="install-script",
+        snippet='"postinstall": "node setup.js"',
+    )
+    unknown_finding = Finding(
+        file="evil.js",
+        status=Status.SUSPICIOUS,
+        reason="unknown-file",
+        snippet="eval(bad)",
+    )
+
+    findings = [install_finding, unknown_finding]
+    result = check_obfuscation(pkg_dir, src_dir, findings)
+
+    assert result[0].file == "package.json"
+    assert result[0].status == Status.SUSPICIOUS
+    assert result[0].reason == "install-script"
+    assert result[0].snippet == '"postinstall": "node setup.js"'
+
+    assert result[1].file == "evil.js"
+    assert result[1].status == Status.SUSPICIOUS
+    assert result[1].reason == "unknown-file"
+    assert result[1].snippet == "eval(bad)"
+
+
+def test_apply_rules_integration_all_rules(tmp_path: Path):
+    """apply_rules runs install-script, unknown-file, and obfuscation in sequence."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir(parents=True)
+    src_dir.mkdir(parents=True)
+
+    # 1. install-script discrepancy
+    (pkg_dir / "package.json").write_text(
+        json.dumps({"name": "demo", "scripts": {"postinstall": "node hook.js"}})
+    )
+    (src_dir / "package.json").write_text(json.dumps({"name": "demo", "scripts": {}}))
+
+    # 2. unknown file
+    (pkg_dir / "unknown.js").write_text("console.log('secret');")
+
+    # 3. clean matched JS file
+    (pkg_dir / "clean.js").write_text("console.log('clean');")
+    (src_dir / "clean.js").write_text("console.log('clean');")
+
+    # 4. obfuscated matched JS file
+    (pkg_dir / "obfuscated.js").write_text("const hidden = '\\x61\\x62\\x63\\x64';\n")
+    (src_dir / "obfuscated.js").write_text("const hidden = 'abcd';\n")
+
+    findings = match_files(
+        ["clean.js", "obfuscated.js", "package.json", "unknown.js"],
+        ["clean.js", "obfuscated.js", "package.json"],
+    )
+
+    enriched = apply_rules(pkg_dir, src_dir, findings)
+    by_file = {f.file: f for f in enriched}
+
+    # Clean matched JS remains EXPECTED / matched
+    assert by_file["clean.js"].status == Status.EXPECTED
+    assert by_file["clean.js"].reason == "matched"
+
+    # Obfuscated matched JS becomes SUSPICIOUS / obfuscation
+    assert by_file["obfuscated.js"].status == Status.SUSPICIOUS
+    assert by_file["obfuscated.js"].reason == "obfuscation"
+    assert by_file["obfuscated.js"].line == 1
+    assert "\\x61\\x62\\x63\\x64" in by_file["obfuscated.js"].snippet
+
+    # Install script is SUSPICIOUS / install-script
+    assert by_file["package.json"].status == Status.SUSPICIOUS
+    assert by_file["package.json"].reason == "install-script"
+
+    # Unknown file is SUSPICIOUS / unknown-file
+    assert by_file["unknown.js"].status == Status.SUSPICIOUS
+    assert by_file["unknown.js"].reason == "unknown-file"
