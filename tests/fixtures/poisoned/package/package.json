@@ -1,0 +1,17 @@
+{
+  "name": "pkgcheck-poisoned-fixture",
+  "version": "1.0.0",
+  "description": "A sample package for pkgcheck testing",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 0",
+    "postinstall": "node setup.js"
+  },
+  "keywords": [
+    "pkgcheck",
+    "test",
+    "poisoned"
+  ],
+  "author": "OpenSourcers",
+  "license": "MIT"
+}
