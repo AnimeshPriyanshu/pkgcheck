@@ -1,0 +1,22 @@
+[
+  {
+    "file": "index.js",
+    "status": "Expected",
+    "reason": "missing-in-package",
+    "explanation": ""
+  },
+  {
+    "file": "package.json",
+    "status": "Suspicious",
+    "reason": "install-script",
+    "snippet": "\"postinstall\": \"node setup.js\"",
+    "explanation": "The package.json contains an install lifecycle script (preinstall, install, or postinstall) that is not present in the source repository. Attackers often use these scripts to execute malicious code during package installation."
+  },
+  {
+    "file": "setup.js",
+    "status": "Suspicious",
+    "reason": "unknown-file",
+    "snippet": "/**\n * Harmless fixture setup script simulating an unexpected package file.\n * Used for testing pkgcheck unknown-file detection.\n */\nconsole.log(\"pkgcheck test fixture: harmless setup script executed\"",
+    "explanation": "A file exists in the published package but not in the source repository. This could indicate that malicious files were added during the publishing process or that the package was tampered with."
+  }
+]

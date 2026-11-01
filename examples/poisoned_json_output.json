@@ -1,0 +1,19 @@
+[
+  {
+    "file": "index.js",
+    "status": "Expected",
+    "reason": "missing-in-package"
+  },
+  {
+    "file": "package.json",
+    "status": "Suspicious",
+    "reason": "install-script",
+    "snippet": "\"postinstall\": \"node setup.js\""
+  },
+  {
+    "file": "setup.js",
+    "status": "Suspicious",
+    "reason": "unknown-file",
+    "snippet": "/**\n * Harmless fixture setup script simulating an unexpected package file.\n * Used for testing pkgcheck unknown-file detection.\n */\nconsole.log(\"pkgcheck test fixture: harmless setup script executed\""
+  }
+]
