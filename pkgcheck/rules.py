@@ -4,31 +4,18 @@ import json
 from pathlib import Path
 import re
 
+from pkgcheck.constants import (
+    INSTALL_SCRIPTS,
+    JS_EXTENSIONS,
+    HUGE_LINE_THRESHOLD,
+    HEX_ESCAPE_PATTERN,
+    EVAL_PATTERN,
+    BUILD_DIRS,
+    BUILD_EXTENSIONS,
+    SOURCE_EXTENSIONS,
+)
 from pkgcheck.models import Finding, Status
-
-INSTALL_SCRIPTS = {
-    "preinstall",
-    "install",
-    "postinstall",
-    "prepublish",
-    "preprepare",
-    "prepare",
-    "postprepare",
-}
-
-JS_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
-HUGE_LINE_THRESHOLD = 500
-HEX_ESCAPE_PATTERN = re.compile(r"\\x[0-9a-fA-F]{2}")
-EVAL_PATTERN = re.compile(r"\beval\s*\(")
-
-BUILD_DIRS = {"dist"}
-BUILD_EXTENSIONS = {
-    ".min.js",
-    ".min.css",
-    ".d.ts",
-    ".map",
-}
-SOURCE_EXTENSIONS = {".ts", ".js", ".tsx", ".jsx"}
+from pkgcheck.severity import apply_severity_to_findings
 
 
 def _load_json(file_path: Path) -> dict | None:
@@ -283,4 +270,9 @@ def apply_rules(
     findings = check_unknown_files(package_dir, source_dir, findings)
     findings = check_obfuscation(package_dir, source_dir, findings)
     findings = check_build_output(package_dir, source_dir, findings)
+
+    # Apply severity assessment
+    from pkgcheck.severity import apply_severity_to_findings
+    findings = apply_severity_to_findings(findings, package_dir, source_dir)
+
     return findings

@@ -1,7 +1,7 @@
 """Report generation for pkgcheck findings."""
 
 import json
-from pkgcheck.models import Finding, Status
+from pkgcheck.models import Finding, Status, Severity
 
 
 def render_findings(findings: list[Finding], format: str = "table") -> str:
@@ -24,16 +24,17 @@ def _render_table(findings: list[Finding]) -> str:
     rows = []
     for f in findings:
         status = f.status.value
+        severity = f.severity.value
         reason = f.reason
         file = f.file
         snippet = f.snippet if f.snippet is not None else ""
         # Truncate snippet for table readability
         if len(snippet) > 50:
             snippet = snippet[:47] + "..."
-        rows.append((status, reason, file, snippet))
+        rows.append((status, severity, reason, file, snippet))
 
     # Calculate column widths
-    headers = ("STATUS", "REASON", "FILE", "SNIPPET")
+    headers = ("STATUS", "SEVERITY", "REASON", "FILE", "SNIPPET")
     col_widths = [len(h) for h in headers]
     for row in rows:
         for i, cell in enumerate(row):
@@ -49,7 +50,7 @@ def _render_table(findings: list[Finding]) -> str:
     lines.append(sep_line)
     # Data rows
     for row in rows:
-        line = " | ".join(row[i].ljust(col_widths[i]) for i in range(4))
+        line = " | ".join(row[i].ljust(col_widths[i]) for i in range(5))
         lines.append(line)
 
     return "\n".join(lines)
@@ -62,6 +63,7 @@ def _render_json(findings: list[Finding]) -> str:
         item = {
             "file": f.file,
             "status": f.status.value,
+            "severity": f.severity.value,
             "reason": f.reason,
         }
         if f.snippet is not None:
@@ -70,6 +72,17 @@ def _render_json(findings: list[Finding]) -> str:
             item["line"] = f.line
         if f.explanation is not None:
             item["explanation"] = f.explanation
+        if f.evidence:
+            item["evidence"] = [
+                {
+                    "rule": ev.rule,
+                    "evidence_type": ev.evidence_type,
+                    "file": ev.file,
+                    "description": ev.description,
+                    "weight": ev.weight,
+                }
+                for ev in f.evidence
+            ]
         output.append(item)
     return json.dumps(output, indent=2)
 
