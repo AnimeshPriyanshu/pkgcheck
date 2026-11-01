@@ -1,0 +1,17 @@
+[
+  {
+    "file": "README.md",
+    "status": "Expected",
+    "reason": "matched"
+  },
+  {
+    "file": "index.js",
+    "status": "Expected",
+    "reason": "matched"
+  },
+  {
+    "file": "package.json",
+    "status": "Expected",
+    "reason": "matched"
+  }
+]

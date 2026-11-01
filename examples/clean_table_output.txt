@@ -1,0 +1,5 @@
+STATUS   | REASON  | FILE         | SNIPPET
+---------+---------+--------------+--------
+Expected | matched | README.md    |        
+Expected | matched | index.js     |        
+Expected | matched | package.json |

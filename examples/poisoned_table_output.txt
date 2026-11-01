@@ -1,0 +1,6 @@
+STATUS     | REASON             | FILE         | SNIPPET                                           
+-----------+--------------------+--------------+---------------------------------------------------
+Expected   | missing-in-package | index.js     |                                                   
+Suspicious | install-script     | package.json | "postinstall": "node setup.js"                    
+Suspicious | unknown-file       | setup.js     | /**
+ * Harmless fixture setup script simulating...
