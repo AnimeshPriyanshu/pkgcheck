@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     # 1. Compare: list package and source files, and match them
     pkg_files = list_package_files(args.package)
     src_files = list_source_files(args.source)
-    findings = match_files(pkg_files, src_files)
+    findings = match_files(pkg_files, src_files, args.package, args.source)
 
     # 2. Apply rules
     findings = apply_rules(args.package, args.source, findings)

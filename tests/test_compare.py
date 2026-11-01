@@ -103,3 +103,113 @@ def test_list_package_files_empty_dir(tmp_path: Path):
 def test_list_source_files_empty_dir(tmp_path: Path):
     """Empty directory returns empty list."""
     assert list_source_files(tmp_path) == []
+
+
+def test_match_files_content_diff(tmp_path: Path):
+    """Files with same name but different content get content-diff reason."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir()
+    src_dir.mkdir()
+
+    (pkg_dir / "index.js").write_text("console.log('package')")
+    (src_dir / "index.js").write_text("console.log('source')")
+
+    pkg_files = list_package_files(pkg_dir)
+    src_files = list_source_files(src_dir)
+    findings = match_files(pkg_files, src_files, pkg_dir, src_dir)
+
+    diff = next(f for f in findings if f.file == "index.js")
+    assert diff.reason == "content-diff"
+    assert diff.status == Status.SUSPICIOUS
+    assert "package:" in diff.snippet
+    assert "source:" in diff.snippet
+
+
+def test_match_files_identical_content(tmp_path: Path):
+    """Files with identical content remain matched."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir()
+    src_dir.mkdir()
+
+    content = "console.log('hello')"
+    (pkg_dir / "index.js").write_text(content)
+    (src_dir / "index.js").write_text(content)
+
+    pkg_files = list_package_files(pkg_dir)
+    src_files = list_source_files(src_dir)
+    findings = match_files(pkg_files, src_files, pkg_dir, src_dir)
+
+    matched = next(f for f in findings if f.file == "index.js")
+    assert matched.reason == "matched"
+    assert matched.status == Status.EXPECTED
+
+
+def test_match_files_empty_files(tmp_path: Path):
+    """Empty files with same name are matched."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir()
+    src_dir.mkdir()
+
+    (pkg_dir / "empty.js").write_text("")
+    (src_dir / "empty.js").write_text("")
+
+    pkg_files = list_package_files(pkg_dir)
+    src_files = list_source_files(src_dir)
+    findings = match_files(pkg_files, src_files, pkg_dir, src_dir)
+
+    matched = next(f for f in findings if f.file == "empty.js")
+    assert matched.reason == "matched"
+    assert matched.status == Status.EXPECTED
+
+
+def test_match_files_binary_files(tmp_path: Path):
+    """Binary files with different content get content-diff."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir()
+    src_dir.mkdir()
+
+    (pkg_dir / "data.bin").write_bytes(b"\x00\x01\x02\x03")
+    (src_dir / "data.bin").write_bytes(b"\x04\x05\x06\x07")
+
+    pkg_files = list_package_files(pkg_dir)
+    src_files = list_source_files(src_dir)
+    findings = match_files(pkg_files, src_files, pkg_dir, src_dir)
+
+    diff = next(f for f in findings if f.file == "data.bin")
+    assert diff.reason == "content-diff"
+    assert diff.status == Status.SUSPICIOUS
+
+
+def test_match_files_missing_and_unknown_still_work(tmp_path: Path):
+    """Missing and unknown file detection still works with content comparison."""
+    pkg_dir = tmp_path / "pkg"
+    src_dir = tmp_path / "src"
+    pkg_dir.mkdir()
+    src_dir.mkdir()
+
+    (pkg_dir / "index.js").write_text("console.log('pkg')")
+    (pkg_dir / "evil.js").write_text("malicious()")
+    (src_dir / "index.js").write_text("console.log('src')")
+    (src_dir / "README.md").write_text("# Readme")
+
+    pkg_files = list_package_files(pkg_dir)
+    src_files = list_source_files(src_dir)
+    findings = match_files(pkg_files, src_files, pkg_dir, src_dir)
+
+    by_file = {f.file: f for f in findings}
+
+    # index.js: content differs
+    assert by_file["index.js"].reason == "content-diff"
+    assert by_file["index.js"].status == Status.SUSPICIOUS
+
+    # evil.js: unknown file
+    assert by_file["evil.js"].reason == "unknown-file"
+    assert by_file["evil.js"].status == Status.SUSPICIOUS
+
+    # README.md: missing in package
+    assert by_file["README.md"].reason == "missing-in-package"
+    assert by_file["README.md"].status == Status.EXPECTED
